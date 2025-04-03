@@ -206,7 +206,6 @@ class YouTubeTranslator:
                 download_root=os.path.join(self.script_dir, "whisper_models")
             )
             
-            # Usunięto parametr language="auto" i pozostawiamy automatyczne wykrywanie
             segments, info = model.transcribe(
                 audio_path,
                 beam_size=5
@@ -393,6 +392,66 @@ class YouTubeTranslator:
             logging.error(f"Audio replacement failed: {str(e)}")
             raise RuntimeError(f"Audio replacement failed: {e}")
 
+    def process_local_video(self, video_path, from_lang="en", to_lang="pl", output_dir=None, progress_callback=None):
+        """Przetwarzaj lokalny plik wideo"""
+        if output_dir is None:
+            output_dir = os.path.dirname(video_path)
+        
+        try:
+            # Krok 1: Wyodrębnij audio (pomiń pobieranie)
+            if progress_callback:
+                progress_callback(40)
+            logging.info("Extracting audio...")
+            audio_path = self.extract_audio(video_path, progress_callback)
+            
+            # Krok 2: Transkrybuj audio
+            if progress_callback:
+                progress_callback(50)
+            logging.info("Transcribing audio...")
+            language, segments = self.transcribe(audio_path, progress_callback)
+            
+            # Krok 3: Wygeneruj napisy
+            if progress_callback:
+                progress_callback(60)
+            logging.info("Generating subtitles...")
+            subtitle_path = self.generate_subtitle_file(language, segments, video_path)
+            
+            # Krok 4: Przetłumacz napisy
+            if progress_callback:
+                progress_callback(70)
+            logging.info("Translating subtitles...")
+            translated_subtitle_path = self.translate_subtitles(subtitle_path, from_lang, to_lang, progress_callback)
+            
+            # Krok 5: Wygeneruj przetłumaczone audio
+            if progress_callback:
+                progress_callback(80)
+            logging.info("Generating translated audio...")
+            translated_audio_path = self.generate_translated_audio(translated_subtitle_path, video_path, to_lang, progress_callback)
+            
+            # Krok 6: Zastąp audio w wideo
+            if progress_callback:
+                progress_callback(95)
+            logging.info("Replacing audio track...")
+            
+            # Utwórz nazwę pliku wynikowego
+            video_name = os.path.splitext(os.path.basename(video_path))[0]
+            final_filename = f"{video_name}_translated_{to_lang}.mp4"
+            final_video_path = os.path.join(output_dir, final_filename)
+            
+            final_video_path = self.replace_audio(
+                video_path, 
+                translated_audio_path, 
+                final_video_path, 
+                progress_callback
+            )
+            
+            logging.info(f"Translated video saved as: {final_video_path}")
+            return final_video_path
+            
+        except Exception as e:
+            logging.error(f"Translation process failed: {str(e)}")
+            raise
+
     def cancel(self):
         """Anuluj bieżący proces"""
         self.cancel_process = True
@@ -485,7 +544,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         super().__init__()
         self.translator = YouTubeTranslator()
         self.title("YouTube Video Translator")
-        self.geometry("800x600")
+        self.geometry("800x670")
         self.minsize(700, 500)
         
         # Konfiguracja siatki
@@ -553,7 +612,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         self.quality_combobox.set("best")
         self.quality_combobox.grid(row=2, column=1, padx=10, pady=5, sticky="w")
         
-        # Folder wyjściowy
+        # Folder wyjściowy i lokalny plik
         self.output_frame = ctk.CTkFrame(self)
         self.output_frame.grid(row=3, column=0, columnspan=2, padx=20, pady=10, sticky="nsew")
         self.output_frame.grid_columnconfigure(1, weight=1)
@@ -567,9 +626,22 @@ class YouTubeTranslatorApp(ctk.CTk):
         self.output_dir_display = ctk.CTkLabel(
             self.output_frame, 
             text="No folder selected",
-            text_color="blue",
+            text_color="white",
             anchor="w")
         self.output_dir_display.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
+        
+        self.local_file_button = ctk.CTkButton(
+            self.output_frame, 
+            text="Select Local Video File",
+            command=self.choose_local_file)
+        self.local_file_button.grid(row=1, column=0, padx=10, pady=5)
+        
+        self.local_file_display = ctk.CTkLabel(
+            self.output_frame, 
+            text="No file selected",
+            text_color="white",
+            anchor="w")
+        self.local_file_display.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
         
         # Przyciski sterujące
         self.control_frame = ctk.CTkFrame(self)
@@ -593,7 +665,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         # Pasek postępu
         self.progress_bar = ctk.CTkProgressBar(self, orientation="horizontal")
         self.progress_bar.set(0)
-        self.progress_bar.grid(row=5, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
+        self.progress_bar.grid(row=5, column=0, columnspan=2, padx=(20,60), pady=10, sticky="ew")
         
         self.progress_label = ctk.CTkLabel(self, text="0%")
         self.progress_label.grid(row=5, column=1, padx=20, pady=10, sticky="e")
@@ -626,16 +698,28 @@ class YouTubeTranslatorApp(ctk.CTk):
         else:
             self.output_dir_display.configure(text="No folder selected")
 
+    def choose_local_file(self):
+        """Wybierz lokalny plik wideo"""
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Video Files", "*.mp4 *.avi *.mov *.mkv"), ("All Files", "*.*")])
+        if file_path:
+            self.local_file_display.configure(text=file_path)
+            # Automatycznie ustaw folder wyjściowy na folder zawierający plik
+            self.output_dir_display.configure(text=os.path.dirname(file_path))
+        else:
+            self.local_file_display.configure(text="No file selected")
+
     def start_process(self):
         """Rozpocznij proces tłumaczenia"""
         youtube_url = self.url_entry.get().strip()
+        local_file_path = self.local_file_display.cget("text")
         from_lang = self.translator.language_codes[self.from_lang_combobox.get()]
         to_lang = self.translator.language_codes[self.to_lang_combobox.get()]
         quality = self.quality_combobox.get()
         output_dir = self.output_dir_display.cget("text")
         
-        if not youtube_url:
-            messagebox.showerror("Error", "Please enter a YouTube URL.")
+        if not youtube_url and local_file_path == "No file selected":
+            messagebox.showerror("Error", "Please enter a YouTube URL or select a local video file.")
             return
         
         if output_dir == "No folder selected":
@@ -648,16 +732,49 @@ class YouTubeTranslatorApp(ctk.CTk):
         self.progress_bar.set(0)
         self.progress_label.configure(text="0%")
         
-        # Uruchom proces w osobnym wątku
+        # Uruchom odpowiedni proces w osobnym wątku
         import threading
-        threading.Thread(
-            target=self.run_translation_process,
-            args=(youtube_url, from_lang, to_lang, quality, output_dir),
-            daemon=True
-        ).start()
-
-    def run_translation_process(self, youtube_url, from_lang, to_lang, quality, output_dir):
-        """Uruchom proces tłumaczenia w osobnym wątku"""
+        if local_file_path != "No file selected":
+            # Przetwarzanie lokalnego pliku
+            threading.Thread(
+                target=self.run_local_video_process,
+                args=(local_file_path, from_lang, to_lang, output_dir),
+                daemon=True
+            ).start()
+        else:
+            # Przetwarzanie YouTube
+            threading.Thread(
+                target=self.run_youtube_process,
+                args=(youtube_url, from_lang, to_lang, quality, output_dir),
+                daemon=True
+            ).start()
+    
+    def run_local_video_process(self, video_path, from_lang, to_lang, output_dir):
+        """Uruchom proces tłumaczenia dla lokalnego pliku"""
+        try:
+            final_path = self.translator.process_local_video(
+                video_path,
+                from_lang,
+                to_lang,
+                output_dir,
+                progress_callback=self.update_progress
+            )
+            
+            self.status_label.configure(
+                text=f"Success! Saved to: {os.path.basename(final_path)}", 
+                text_color="green")
+            messagebox.showinfo("Success", f"Translated video saved to:\n{final_path}")
+            
+        except Exception as e:
+            self.status_label.configure(text=f"Error: {str(e)}", text_color="red")
+            logging.error(f"Process failed: {str(e)}")
+            
+        finally:
+            self.set_ui_state(disabled=False)
+            self.translator.cancel_process = False
+            
+    def run_youtube_process(self, youtube_url, from_lang, to_lang, quality, output_dir):
+        """Uruchom proces tłumaczenia dla YouTube"""
         try:
             final_path = self.translator.main(
                 youtube_url,
@@ -701,6 +818,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         self.to_lang_combobox.configure(state=state)
         self.quality_combobox.configure(state=state)
         self.output_dir_button.configure(state=state)
+        self.local_file_button.configure(state=state)
         self.start_button.configure(state=state)
         self.cancel_button.configure(state="normal" if disabled else "disabled")
 
