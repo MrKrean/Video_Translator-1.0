@@ -118,8 +118,8 @@ class YouTubeTranslator:
         seconds = math.floor(seconds)
         return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
 
-    def download_youtube_video(self, youtube_url, output_path, progress_callback=None):
-        """Pobierz wideo z YouTube"""
+    def download_youtube_video(self, youtube_url, output_path, quality='best', progress_callback=None):
+        """Pobierz wideo z YouTube z wybraną jakością"""
         if not self._validate_youtube_url(youtube_url):
             raise ValueError("Invalid YouTube URL")
         
@@ -127,12 +127,27 @@ class YouTubeTranslator:
         
         try:
             ydl_opts = {
-                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
                 'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
                 'ffmpeg_location': self.ffmpeg_path,
                 'progress_hooks': [lambda d: self._download_progress(d, progress_callback)],
                 'quiet': True,
             }
+            
+            # Format selection based on quality
+            if quality == 'best':
+                ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+            elif quality == '1080p':
+                ydl_opts['format'] = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+            elif quality == '720p':
+                ydl_opts['format'] = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+            elif quality == '480p':
+                ydl_opts['format'] = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+            elif quality == '360p':
+                ydl_opts['format'] = 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+            elif quality == '240p':
+                ydl_opts['format'] = 'bestvideo[height<=240][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+            elif quality == '144p':
+                ydl_opts['format'] = 'bestvideo[height<=144][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(youtube_url, download=True)
@@ -382,17 +397,17 @@ class YouTubeTranslator:
         """Anuluj bieżący proces"""
         self.cancel_process = True
 
-    def main(self, youtube_url, from_lang="en", to_lang="pl", output_dir=None, progress_callback=None):
+    def main(self, youtube_url, from_lang="en", to_lang="pl", output_dir=None, quality='best', progress_callback=None):
         """Główna metoda wykonująca proces tłumaczenia wideo"""
         if output_dir is None:
             output_dir = self.script_dir
         
         try:
-            # Krok 1: Pobierz wideo z YouTube
+            # Krok 1: Pobierz wideo z YouTube z wybraną jakością
             if progress_callback:
                 progress_callback(10)
-            logging.info("Downloading YouTube video...")
-            video_path = self.download_youtube_video(youtube_url, output_dir, progress_callback)
+            logging.info(f"Downloading YouTube video with quality: {quality}...")
+            video_path = self.download_youtube_video(youtube_url, output_dir, quality, progress_callback)
             
             # Krok 2: Wyodrębnij audio
             if progress_callback:
@@ -475,7 +490,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         
         # Konfiguracja siatki
         self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(7, weight=1)
+        self.grid_rowconfigure(8, weight=1)
         
         # Interfejs użytkownika
         self.setup_ui()
@@ -502,7 +517,7 @@ class YouTubeTranslatorApp(ctk.CTk):
             placeholder_text="https://www.youtube.com/watch?v=...")
         self.url_entry.grid(row=1, column=1, padx=20, pady=(0, 10), sticky="ew")
         
-        # Języki
+        # Języki i jakość
         self.language_frame = ctk.CTkFrame(self)
         self.language_frame.grid(row=2, column=0, columnspan=2, padx=20, pady=10, sticky="nsew")
         self.language_frame.grid_columnconfigure(1, weight=1)
@@ -526,6 +541,17 @@ class YouTubeTranslatorApp(ctk.CTk):
             width=200)
         self.to_lang_combobox.set("Polish")
         self.to_lang_combobox.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+        
+        # Wybór jakości
+        self.quality_label = ctk.CTkLabel(self.language_frame, text="Video Quality:")
+        self.quality_label.grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        
+        self.quality_combobox = ctk.CTkComboBox(
+            self.language_frame, 
+            values=['best', '1080p', '720p', '480p', '360p', '240p', '144p'],
+            width=200)
+        self.quality_combobox.set("best")
+        self.quality_combobox.grid(row=2, column=1, padx=10, pady=5, sticky="w")
         
         # Folder wyjściowy
         self.output_frame = ctk.CTkFrame(self)
@@ -605,6 +631,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         youtube_url = self.url_entry.get().strip()
         from_lang = self.translator.language_codes[self.from_lang_combobox.get()]
         to_lang = self.translator.language_codes[self.to_lang_combobox.get()]
+        quality = self.quality_combobox.get()
         output_dir = self.output_dir_display.cget("text")
         
         if not youtube_url:
@@ -625,11 +652,11 @@ class YouTubeTranslatorApp(ctk.CTk):
         import threading
         threading.Thread(
             target=self.run_translation_process,
-            args=(youtube_url, from_lang, to_lang, output_dir),
+            args=(youtube_url, from_lang, to_lang, quality, output_dir),
             daemon=True
         ).start()
 
-    def run_translation_process(self, youtube_url, from_lang, to_lang, output_dir):
+    def run_translation_process(self, youtube_url, from_lang, to_lang, quality, output_dir):
         """Uruchom proces tłumaczenia w osobnym wątku"""
         try:
             final_path = self.translator.main(
@@ -637,6 +664,7 @@ class YouTubeTranslatorApp(ctk.CTk):
                 from_lang,
                 to_lang,
                 output_dir,
+                quality,
                 progress_callback=self.update_progress
             )
             
@@ -671,6 +699,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         self.url_entry.configure(state=state)
         self.from_lang_combobox.configure(state=state)
         self.to_lang_combobox.configure(state=state)
+        self.quality_combobox.configure(state=state)
         self.output_dir_button.configure(state=state)
         self.start_button.configure(state=state)
         self.cancel_button.configure(state="normal" if disabled else "disabled")
