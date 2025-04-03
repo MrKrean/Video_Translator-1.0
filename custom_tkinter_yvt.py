@@ -15,6 +15,7 @@ from pydub.utils import which
 import argostranslate.package
 from pydub import AudioSegment
 import argostranslate.translate
+from datetime import datetime
 from tkinter import filedialog, messagebox
 from moviepy import VideoFileClip, AudioFileClip
 
@@ -35,6 +36,7 @@ class YouTubeTranslator:
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
         self.ffmpeg_path = self._get_ffmpeg_path("ffmpeg")
         self.ffprobe_path = self._get_ffmpeg_path("ffprobe")
+        self.temp_folder = None
         
         AudioSegment.converter = self.ffmpeg_path
         AudioSegment.ffprobe = self.ffprobe_path
@@ -68,6 +70,23 @@ class YouTubeTranslator:
                     f"or place in the same directory as this script."
                 )
         return path
+
+    def _create_output_folder(self, base_path):
+        base_name = os.path.splitext(os.path.basename(base_path))[0]
+        cleaned_name = self._clean_filename(base_name)
+        output_dir = os.path.dirname(base_path)
+        
+        counter = 1
+        folder_name = cleaned_name
+        while True:
+            self.temp_folder = os.path.join(output_dir, folder_name)
+            if not os.path.exists(self.temp_folder):
+                break
+            folder_name = f"{cleaned_name}_{counter}"
+            counter += 1
+        
+        os.makedirs(self.temp_folder, exist_ok=True)
+        return self.temp_folder
 
     def _validate_youtube_url(self, url):
         patterns = [
@@ -122,26 +141,27 @@ class YouTubeTranslator:
                 'quiet': True,
             }
             
-            if quality == 'best':
-                ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-            elif quality == '1080p':
-                ydl_opts['format'] = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-            elif quality == '720p':
-                ydl_opts['format'] = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-            elif quality == '480p':
-                ydl_opts['format'] = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-            elif quality == '360p':
-                ydl_opts['format'] = 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-            elif quality == '240p':
-                ydl_opts['format'] = 'bestvideo[height<=240][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-            elif quality == '144p':
-                ydl_opts['format'] = 'bestvideo[height<=144][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+            format_options = {
+                'best': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '1080p': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '480p': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '360p': 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '240p': 'bestvideo[height<=240][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '144p': 'bestvideo[height<=144][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+            }
+            
+            ydl_opts['format'] = format_options.get(quality, 'best')
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(youtube_url, download=True)
                 video_filename = ydl.prepare_filename(info_dict)
                 
-            return video_filename
+                output_folder = self._create_output_folder(video_filename)
+                new_path = os.path.join(output_folder, os.path.basename(video_filename))
+                os.rename(video_filename, new_path)
+                
+            return new_path
         except Exception as e:
             logging.error(f"Video download failed: {str(e)}")
             raise RuntimeError(f"Failed to download video: {e}")
@@ -156,8 +176,8 @@ class YouTubeTranslator:
 
     def extract_audio(self, video_path, progress_callback=None):
         try:
-            base_name = os.path.splitext(video_path)[0]
-            extracted_audio = f"{base_name}_extracted_audio.wav"
+            base_name = os.path.splitext(os.path.basename(video_path))[0]
+            extracted_audio = os.path.join(self.temp_folder, f"{base_name}_extracted_audio.wav")
             
             if os.path.exists(extracted_audio):
                 os.remove(extracted_audio)
@@ -221,8 +241,8 @@ class YouTubeTranslator:
 
     def generate_subtitle_file(self, language, segments, output_path):
         try:
-            base_name = os.path.splitext(output_path)[0]
-            subtitle_file = f"{base_name}_subtitles.srt"
+            base_name = os.path.splitext(os.path.basename(output_path))[0]
+            subtitle_file = os.path.join(self.temp_folder, f"{base_name}_subtitles.srt")
             
             subs = pysrt.SubRipFile()
             
@@ -230,7 +250,6 @@ class YouTubeTranslator:
                 sub = pysrt.SubRipItem()
                 sub.index = index + 1
                 
-                # Replace from_seconds with direct time calculation
                 def seconds_to_time(seconds):
                     hours = int(seconds // 3600)
                     seconds %= 3600
@@ -279,8 +298,8 @@ class YouTubeTranslator:
                     progress = 70 + (i / len(subs) * 10)
                     progress_callback(progress)
             
-            base_name = os.path.splitext(subtitle_path)[0]
-            translated_subtitle_path = f"{base_name}_{to_lang}.srt"
+            base_name = os.path.splitext(os.path.basename(subtitle_path))[0]
+            translated_subtitle_path = os.path.join(self.temp_folder, f"{base_name}_{to_lang}.srt")
             
             subs.save(translated_subtitle_path, encoding='utf-8')
             
@@ -303,7 +322,7 @@ class YouTubeTranslator:
                     break
                     
                 start_time = sub.start.ordinal / 1000.0
-                temp_file = f"temp_{i}.mp3"
+                temp_file = os.path.join(self.temp_folder, f"temp_{i}.mp3")
                 
                 try:
                     tts = gTTS(sub.text, lang=to_lang)
@@ -322,8 +341,8 @@ class YouTubeTranslator:
                     logging.warning(f"Failed to generate TTS for segment {i}: {str(e)}")
                     continue
             
-            base_name = os.path.splitext(output_path)[0]
-            translated_audio_path = f"{base_name}_translated_audio.wav"
+            base_name = os.path.splitext(os.path.basename(output_path))[0]
+            translated_audio_path = os.path.join(self.temp_folder, f"{base_name}_translated_audio.wav")
             
             combined.export(translated_audio_path, format='wav')
             
@@ -378,10 +397,9 @@ class YouTubeTranslator:
             raise RuntimeError(f"Audio replacement failed: {e}")
 
     def process_local_video(self, video_path, from_lang="en", to_lang="pl", output_dir=None, progress_callback=None):
-        if output_dir is None:
-            output_dir = os.path.dirname(video_path)
-        
         try:
+            self._create_output_folder(video_path)
+            
             if progress_callback:
                 progress_callback(40)
             logging.info("Extracting audio...")
@@ -413,7 +431,7 @@ class YouTubeTranslator:
             
             video_name = os.path.splitext(os.path.basename(video_path))[0]
             final_filename = f"{video_name}_translated_{to_lang}.mp4"
-            final_video_path = os.path.join(output_dir, final_filename)
+            final_video_path = os.path.join(self.temp_folder, final_filename)
             
             final_video_path = self.replace_audio(
                 video_path, 
@@ -473,7 +491,7 @@ class YouTubeTranslator:
             
             video_name = os.path.splitext(os.path.basename(video_path))[0]
             final_filename = f"{video_name}_translated_{to_lang}.mp4"
-            final_video_path = os.path.join(output_dir, final_filename)
+            final_video_path = os.path.join(self.temp_folder, final_filename)
             
             final_video_path = self.replace_audio(
                 video_path, 
@@ -767,16 +785,17 @@ class YouTubeTranslatorApp(ctk.CTk):
     def open_translated_video(self):
         if self.final_video_path and os.path.exists(self.final_video_path):
             try:
+                folder_path = os.path.dirname(self.final_video_path)
                 if platform.system() == "Windows":
-                    os.startfile(self.final_video_path)
+                    os.startfile(folder_path)
                 elif platform.system() == "Darwin":
-                    subprocess.call(("open", self.final_video_path))
+                    subprocess.call(["open", folder_path])
                 else:
-                    subprocess.call(("xdg-open", self.final_video_path))
+                    subprocess.call(["xdg-open", folder_path])
             except Exception as e:
-                messagebox.showerror("Error", f"Could not open file: {str(e)}")
+                messagebox.showerror("Error", f"Could not open folder: {str(e)}")
         else:
-            messagebox.showwarning("Warning", "Translated video file not found")
+            messagebox.showwarning("Warning", "Translated video folder not found")
 
     def cancel_process(self):
         self.translator.cancel_process = True
