@@ -10,10 +10,11 @@ import platform
 import subprocess
 import customtkinter as ctk
 from PIL import Image
-from gtts import gTTS
-from pydub.utils import which
+import edge_tts
+import asyncio
 import argostranslate.package
 from pydub import AudioSegment
+from pydub.utils import which
 import argostranslate.translate
 from datetime import datetime
 from tkinter import filedialog, messagebox
@@ -52,6 +53,19 @@ class YouTubeTranslator:
             "Russian": "ru",
             "Chinese": "zh",
             "Portuguese": "pt"
+        }
+        
+        self.edge_tts_voices = {
+            "en": "en-US-GuyNeural",
+            "pl": "pl-PL-MarekNeural",
+            "es": "es-ES-AlvaroNeural",
+            "fr": "fr-FR-HenriNeural",
+            "de": "de-DE-ConradNeural",
+            "it": "it-IT-DiegoNeural",
+            "ja": "ja-JP-NanjoNeural",
+            "ru": "ru-RU-DmitryNeural",
+            "zh": "zh-CN-YunxiNeural",
+            "pt": "pt-BR-AntonioNeural"
         }
         
         self.cancel_process = False
@@ -311,11 +325,17 @@ class YouTubeTranslator:
             logging.error(f"Translation failed: {str(e)}")
             raise RuntimeError(f"Translation failed: {e}")
 
+    async def _generate_edge_tts_audio(self, text, output_file, voice):
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(output_file)
+
     def generate_translated_audio(self, subtitle_path, output_path, to_lang="en", progress_callback=None):
         try:
             subs = pysrt.open(subtitle_path)
             combined = AudioSegment.silent(duration=0)
             temp_files = []
+            
+            voice = self.edge_tts_voices.get(to_lang, "en-US-GuyNeural")
             
             for i, sub in enumerate(subs):
                 if self.cancel_process:
@@ -325,8 +345,12 @@ class YouTubeTranslator:
                 temp_file = os.path.join(self.temp_folder, f"temp_{i}.mp3")
                 
                 try:
-                    tts = gTTS(sub.text, lang=to_lang)
-                    tts.save(temp_file)
+                    # Użycie Edge-TTS
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(self._generate_edge_tts_audio(sub.text, temp_file, voice))
+                    loop.close()
+                    
                     temp_files.append(temp_file)
                     
                     audio = AudioSegment.from_mp3(temp_file)
