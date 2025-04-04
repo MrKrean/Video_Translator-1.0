@@ -102,6 +102,29 @@ class YouTubeTranslator:
         os.makedirs(self.temp_folder, exist_ok=True)
         return self.temp_folder
 
+    def _clean_temp_files(self):
+        """Usuwa tylko pliki tymczasowe, pozostawiając folder i przetłumaczony film."""
+        if not self.temp_folder or not os.path.exists(self.temp_folder):
+            return
+
+        try:
+            for filename in os.listdir(self.temp_folder):
+                file_path = os.path.join(self.temp_folder, filename)
+                
+                if os.path.isfile(file_path):
+                    if (
+                        "_extracted_audio.wav" in filename or
+                        "_subtitles.srt" in filename or
+                        "_translated_audio.wav" in filename or
+                        filename.startswith("temp_") or
+                        (filename.endswith(".srt") and "_pl.srt" in filename)
+                    ):
+                        os.remove(file_path)
+                        logging.info(f"Usunięto plik tymczasowy: {filename}")
+
+        except Exception as e:
+            logging.warning(f"Błąd podczas usuwania plików: {str(e)}")
+
     def _validate_youtube_url(self, url):
         patterns = [
             r'(https?://)?(www\.)?youtube\.com/watch\?v=',
@@ -345,7 +368,6 @@ class YouTubeTranslator:
                 temp_file = os.path.join(self.temp_folder, f"temp_{i}.mp3")
                 
                 try:
-                    # Użycie Edge-TTS
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     loop.run_until_complete(self._generate_edge_tts_audio(sub.text, temp_file, voice))
@@ -470,6 +492,8 @@ class YouTubeTranslator:
         except Exception as e:
             logging.error(f"Translation process failed: {str(e)}")
             raise
+        finally:
+            self._clean_temp_files()
 
     def cancel(self):
         self.cancel_process = True
@@ -530,6 +554,8 @@ class YouTubeTranslator:
         except Exception as e:
             logging.error(f"Translation process failed: {str(e)}")
             raise
+        finally:
+            self._clean_temp_files()
 
 class TextboxHandler(logging.Handler):
     def __init__(self, textbox):
@@ -809,17 +835,16 @@ class YouTubeTranslatorApp(ctk.CTk):
     def open_translated_video(self):
         if self.final_video_path and os.path.exists(self.final_video_path):
             try:
-                folder_path = os.path.dirname(self.final_video_path)
                 if platform.system() == "Windows":
-                    os.startfile(folder_path)
+                    os.startfile(self.final_video_path)
                 elif platform.system() == "Darwin":
-                    subprocess.call(["open", folder_path])
+                    subprocess.call(["open", self.final_video_path])
                 else:
-                    subprocess.call(["xdg-open", folder_path])
+                    subprocess.call(["xdg-open", self.final_video_path])
             except Exception as e:
-                messagebox.showerror("Error", f"Could not open folder: {str(e)}")
+                messagebox.showerror("Error", f"Could not open video: {str(e)}")
         else:
-            messagebox.showwarning("Warning", "Translated video folder not found")
+            messagebox.showwarning("Warning", "Translated video not found")
 
     def cancel_process(self):
         self.translator.cancel_process = True
