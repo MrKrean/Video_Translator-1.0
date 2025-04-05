@@ -2,6 +2,7 @@ import os
 import sys
 import math
 import re
+import glob
 import pysrt
 import ffmpeg
 import yt_dlp
@@ -19,6 +20,7 @@ import argostranslate.translate
 from datetime import datetime
 from tkinter import filedialog, messagebox
 from moviepy import VideoFileClip, AudioFileClip
+from tkinter import ttk
 
 # Konfiguracja logowania
 logging.basicConfig(
@@ -38,9 +40,15 @@ class YouTubeTranslator:
         self.ffmpeg_path = self._get_ffmpeg_path("ffmpeg")
         self.ffprobe_path = self._get_ffmpeg_path("ffprobe")
         self.temp_folder = None
+        self.clean_temp_files = True
+        self.temp_files_to_keep = set()
+        self.temp_folders = set()
+        self.cancel_process = False
         
         AudioSegment.converter = self.ffmpeg_path
         AudioSegment.ffprobe = self.ffprobe_path
+        
+        self._register_temp_patterns()
         
         self.language_codes = {
             "English": "en",
@@ -67,8 +75,21 @@ class YouTubeTranslator:
             "zh": "zh-CN-YunxiNeural",
             "pt": "pt-BR-AntonioNeural"
         }
-        
-        self.cancel_process = False
+
+    def _register_temp_patterns(self):
+        """Rejestruje wzorce nazw plików tymczasowych"""
+        self.temp_file_patterns = [
+            r'.*_extracted_audio\.(wav|mp3)$',
+            r'.*_subtitles\.srt$',
+            r'.*_subtitles_(?:pl|en|ru|es|fr|de|it|ja|zh|pt)\.srt$',
+            r'.*_translated_audio\.(wav|mp3)$',
+            r'temp_\d+\.(mp3|wav)$',
+            r'.*_tmp_.*',
+            r'.*temp_.*',
+            r'^tmp.*',
+            r'.*\.temp$',
+            r'ffmpeg_temp\.\w+'
+        ]
 
     def _get_ffmpeg_path(self, executable):
         if platform.system() == "Windows":
@@ -85,6 +106,86 @@ class YouTubeTranslator:
                 )
         return path
 
+    def _register_temp_file(self, file_path):
+        """Rejestruje plik tymczasowy do późniejszego usunięcia"""
+        if file_path and os.path.exists(file_path):
+            self.temp_files_to_keep.discard(file_path)
+            base_name = os.path.basename(file_path)
+            for pattern in self.temp_file_patterns:
+                if re.match(pattern, base_name):
+                    self.temp_files_to_keep.discard(file_path)
+                    break
+
+    def _keep_temp_file(self, file_path):
+        """Oznacza plik jako zachowywany (nie będzie usunięty)"""
+        if file_path and os.path.exists(file_path):
+            self.temp_files_to_keep.add(file_path)
+
+    def _clean_temp_files(self):
+        """Usuwa WSZYSTKIE pliki tymczasowe"""
+        if not self.clean_temp_files:
+            return
+
+        if not self.temp_folder or not os.path.exists(self.temp_folder):
+            return
+
+        try:
+            # Lista konkretnych wzorców do usunięcia
+            specific_patterns = [
+                "*_extracted_audio.*",
+                "*_subtitles.srt",
+                "*_subtitles_*.srt",
+                "*_translated_audio.*"
+            ]
+            
+            # Usuń pliki pasujące do konkretnych wzorców
+            for pattern in specific_patterns:
+                for file in glob.glob(os.path.join(self.temp_folder, pattern)):
+                    if file not in self.temp_files_to_keep:
+                        try:
+                            os.remove(file)
+                            logging.info(f"Usunięto plik tymczasowy: {file}")
+                        except Exception as e:
+                            logging.warning(f"Błąd usuwania {file}: {str(e)}")
+            
+            # Czyszczenie rekurencyjne całego folderu tymczasowego
+            for root, dirs, files in os.walk(self.temp_folder, topdown=False):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    if file_path not in self.temp_files_to_keep:
+                        try:
+                            # Sprawdź czy plik pasuje do któregoś ze wzorców
+                            file_match = any(
+                                re.fullmatch(pattern, file) 
+                                for pattern in self.temp_file_patterns
+                            )
+                            if file_match or "temp" in file.lower() or "tmp" in file.lower():
+                                os.remove(file_path)
+                                logging.info(f"Usunięto plik tymczasowy: {file_path}")
+                        except Exception as e:
+                            logging.warning(f"Błąd usuwania {file_path}: {str(e)}")
+                
+                # Usuń puste foldery
+                try:
+                    if not os.listdir(root):
+                        os.rmdir(root)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logging.error(f"Błąd czyszczenia plików: {str(e)}")
+
+    def _clean_empty_folders(self):
+        """Rekursywnie usuwa puste foldery tymczasowe"""
+        for folder in list(self.temp_folders):
+            try:
+                if os.path.exists(folder) and not os.listdir(folder):
+                    os.rmdir(folder)
+                    self.temp_folders.remove(folder)
+                    logging.info(f"Usunięto pusty folder tymczasowy: {folder}")
+            except Exception as e:
+                logging.warning(f"Błąd podczas usuwania folderu {folder}: {str(e)}")
+
     def _create_output_folder(self, base_path):
         base_name = os.path.splitext(os.path.basename(base_path))[0]
         cleaned_name = self._clean_filename(base_name)
@@ -100,30 +201,11 @@ class YouTubeTranslator:
             counter += 1
         
         os.makedirs(self.temp_folder, exist_ok=True)
+        self.temp_folders.add(self.temp_folder)
         return self.temp_folder
 
-    def _clean_temp_files(self):
-        """Usuwa tylko pliki tymczasowe, pozostawiając folder i przetłumaczony film."""
-        if not self.temp_folder or not os.path.exists(self.temp_folder):
-            return
-
-        try:
-            for filename in os.listdir(self.temp_folder):
-                file_path = os.path.join(self.temp_folder, filename)
-                
-                if os.path.isfile(file_path):
-                    if (
-                        "_extracted_audio.wav" in filename or
-                        "_subtitles.srt" in filename or
-                        "_translated_audio.wav" in filename or
-                        filename.startswith("temp_") or
-                        (filename.endswith(".srt") and "_pl.srt" in filename)
-                    ):
-                        os.remove(file_path)
-                        logging.info(f"Usunięto plik tymczasowy: {filename}")
-
-        except Exception as e:
-            logging.warning(f"Błąd podczas usuwania plików: {str(e)}")
+    def _clean_filename(self, filename):
+        return re.sub(r'[\\/*?:"<>|]', "", filename)
 
     def _validate_youtube_url(self, url):
         patterns = [
@@ -147,26 +229,23 @@ class YouTubeTranslator:
             
             if free_gb < required_gb:
                 raise RuntimeError(
-                    f"Insufficient disk space. Required: {required_gb}GB, Available: {free_gb:.2f}GB"
+                    f"Niewystarczająca ilość miejsca na dysku. Wymagane: {required_gb}GB, Dostępne: {free_gb:.2f}GB"
                 )
         except Exception as e:
-            logging.warning(f"Could not check disk space: {str(e)}")
-
-    def _clean_filename(self, filename):
-        return re.sub(r'[\\/*?:"<>|]', "", filename)
+            logging.warning(f"Nie można sprawdzić miejsca na dysku: {str(e)}")
 
     def format_time(self, seconds):
         hours = math.floor(seconds / 3600)
         seconds %= 3600
         minutes = math.floor(seconds / 60)
         seconds %= 60
-        milliseconds = round((seconds - math.floor(seconds))) * 1000
+        milliseconds = round((seconds - math.floor(seconds)) * 1000)
         seconds = math.floor(seconds)
         return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
 
     def download_youtube_video(self, youtube_url, output_path, quality='best', progress_callback=None):
         if not self._validate_youtube_url(youtube_url):
-            raise ValueError("Invalid YouTube URL")
+            raise ValueError("Nieprawidłowy URL YouTube")
         
         self._check_disk_space(output_path)
         
@@ -197,15 +276,16 @@ class YouTubeTranslator:
                 output_folder = self._create_output_folder(video_filename)
                 new_path = os.path.join(output_folder, os.path.basename(video_filename))
                 os.rename(video_filename, new_path)
+                self._keep_temp_file(new_path)
                 
             return new_path
         except Exception as e:
-            logging.error(f"Video download failed: {str(e)}")
-            raise RuntimeError(f"Failed to download video: {e}")
+            logging.error(f"Błąd pobierania wideo: {str(e)}")
+            raise RuntimeError(f"Nie udało się pobrać wideo: {e}")
 
     def _download_progress(self, d, progress_callback):
         if self.cancel_process:
-            raise RuntimeError("Process cancelled by user")
+            raise RuntimeError("Proces anulowany przez użytkownika")
         
         if progress_callback and d['status'] == 'downloading':
             percent = 10 + (d.get('downloaded_bytes', 0) / d.get('total_bytes', 1) * 30)
@@ -226,16 +306,18 @@ class YouTubeTranslator:
                 .run(cmd=self.ffmpeg_path, quiet=True)
             )
             
+            self._register_temp_file(extracted_audio)
+            
             if progress_callback:
                 progress_callback(50)
                 
             return extracted_audio
         except ffmpeg.Error as e:
-            logging.error(f"FFmpeg error: {e.stderr.decode()}")
-            raise RuntimeError(f"Failed to extract audio: {e}")
+            logging.error(f"Błąd FFmpeg: {e.stderr.decode()}")
+            raise RuntimeError(f"Nie udało się wyodrębnić audio: {e}")
         except Exception as e:
-            logging.error(f"Audio extraction failed: {str(e)}")
-            raise RuntimeError(f"Failed to extract audio: {e}")
+            logging.error(f"Błąd wyodrębniania audio: {str(e)}")
+            raise RuntimeError(f"Nie udało się wyodrębnić audio: {e}")
 
     def transcribe(self, audio_path, progress_callback=None):
         try:
@@ -271,10 +353,10 @@ class YouTubeTranslator:
                 
             return language, segments_list
         except ImportError:
-            raise RuntimeError("faster-whisper not installed. Please install it with: pip install faster-whisper")
+            raise RuntimeError("faster-whisper nie jest zainstalowany. Zainstaluj go komendą: pip install faster-whisper")
         except Exception as e:
-            logging.error(f"Transcription failed: {str(e)}")
-            raise RuntimeError(f"Transcription failed: {e}")
+            logging.error(f"Błąd transkrypcji: {str(e)}")
+            raise RuntimeError(f"Błąd transkrypcji: {e}")
 
     def generate_subtitle_file(self, language, segments, output_path):
         try:
@@ -302,10 +384,11 @@ class YouTubeTranslator:
                 subs.append(sub)
             
             subs.save(subtitle_file, encoding='utf-8')
+            self._register_temp_file(subtitle_file)
             return subtitle_file
         except Exception as e:
-            logging.error(f"Subtitle generation failed: {str(e)}")
-            raise RuntimeError(f"Failed to generate subtitles: {e}")
+            logging.error(f"Błąd generowania napisów: {str(e)}")
+            raise RuntimeError(f"Nie udało się wygenerować napisów: {e}")
 
     def translate_subtitles(self, subtitle_path, from_lang, to_lang, progress_callback=None):
         try:
@@ -321,7 +404,7 @@ class YouTubeTranslator:
             )
             
             if not package_to_install:
-                raise RuntimeError(f"No translation package available for {from_lang} to {to_lang}")
+                raise RuntimeError(f"Brak dostępnego pakietu tłumaczenia z {from_lang} na {to_lang}")
             
             argostranslate.package.install_from_path(package_to_install.download())
             
@@ -336,17 +419,18 @@ class YouTubeTranslator:
                     progress_callback(progress)
             
             base_name = os.path.splitext(os.path.basename(subtitle_path))[0]
-            translated_subtitle_path = os.path.join(self.temp_folder, f"{base_name}_{to_lang}.srt")
+            translated_subtitle_path = os.path.join(self.temp_folder, f"{base_name}_subtitles_{to_lang}.srt")
             
             subs.save(translated_subtitle_path, encoding='utf-8')
+            self._register_temp_file(translated_subtitle_path)
             
             if progress_callback:
                 progress_callback(80)
                 
             return translated_subtitle_path
         except Exception as e:
-            logging.error(f"Translation failed: {str(e)}")
-            raise RuntimeError(f"Translation failed: {e}")
+            logging.error(f"Błąd tłumaczenia: {str(e)}")
+            raise RuntimeError(f"Błąd tłumaczenia: {e}")
 
     async def _generate_edge_tts_audio(self, text, output_file, voice):
         communicate = edge_tts.Communicate(text, voice)
@@ -374,6 +458,7 @@ class YouTubeTranslator:
                     loop.close()
                     
                     temp_files.append(temp_file)
+                    self._register_temp_file(temp_file)
                     
                     audio = AudioSegment.from_mp3(temp_file)
                     silent_duration = max(0, start_time * 1000 - len(combined))
@@ -384,11 +469,12 @@ class YouTubeTranslator:
                         progress = 80 + (i / len(subs) * 15)
                         progress_callback(progress)
                 except Exception as e:
-                    logging.warning(f"Failed to generate TTS for segment {i}: {str(e)}")
+                    logging.warning(f"Nie udało się wygenerować TTS dla segmentu {i}: {str(e)}")
                     continue
             
             base_name = os.path.splitext(os.path.basename(output_path))[0]
             translated_audio_path = os.path.join(self.temp_folder, f"{base_name}_translated_audio.wav")
+            self._register_temp_file(translated_audio_path)
             
             combined.export(translated_audio_path, format='wav')
             
@@ -403,8 +489,8 @@ class YouTubeTranslator:
                 
             return translated_audio_path
         except Exception as e:
-            logging.error(f"Audio generation failed: {str(e)}")
-            raise RuntimeError(f"Audio generation failed: {e}")
+            logging.error(f"Błąd generowania audio: {str(e)}")
+            raise RuntimeError(f"Błąd generowania audio: {e}")
 
     def replace_audio(self, video_path, audio_path, output_path, progress_callback=None):
         try:
@@ -431,16 +517,18 @@ class YouTubeTranslator:
                 stderr=subprocess.PIPE
             )
             
+            self._keep_temp_file(output_path)
+            
             if progress_callback:
                 progress_callback(100)
             
             return output_path
         except subprocess.CalledProcessError as e:
-            logging.error(f"FFmpeg error: {e.stderr.decode()}")
-            raise RuntimeError(f"Audio replacement failed: {e}")
+            logging.error(f"Błąd FFmpeg: {e.stderr.decode()}")
+            raise RuntimeError(f"Nie udało się zastąpić ścieżki audio: {e}")
         except Exception as e:
-            logging.error(f"Audio replacement failed: {str(e)}")
-            raise RuntimeError(f"Audio replacement failed: {e}")
+            logging.error(f"Nie udało się zastąpić ścieżki audio: {str(e)}")
+            raise RuntimeError(f"Nie udało się zastąpić ścieżki audio: {e}")
 
     def process_local_video(self, video_path, from_lang="en", to_lang="pl", output_dir=None, progress_callback=None):
         try:
@@ -448,32 +536,32 @@ class YouTubeTranslator:
             
             if progress_callback:
                 progress_callback(40)
-            logging.info("Extracting audio...")
+            logging.info("Wyodrębnianie audio...")
             audio_path = self.extract_audio(video_path, progress_callback)
             
             if progress_callback:
                 progress_callback(50)
-            logging.info("Transcribing audio...")
+            logging.info("Transkrypcja audio...")
             language, segments = self.transcribe(audio_path, progress_callback)
             
             if progress_callback:
                 progress_callback(60)
-            logging.info("Generating subtitles...")
+            logging.info("Generowanie napisów...")
             subtitle_path = self.generate_subtitle_file(language, segments, video_path)
             
             if progress_callback:
                 progress_callback(70)
-            logging.info("Translating subtitles...")
+            logging.info("Tłumaczenie napisów...")
             translated_subtitle_path = self.translate_subtitles(subtitle_path, language, to_lang, progress_callback)
             
             if progress_callback:
                 progress_callback(80)
-            logging.info("Generating translated audio...")
+            logging.info("Generowanie przetłumaczonego audio...")
             translated_audio_path = self.generate_translated_audio(translated_subtitle_path, video_path, to_lang, progress_callback)
             
             if progress_callback:
                 progress_callback(95)
-            logging.info("Replacing audio track...")
+            logging.info("Zastępowanie ścieżki audio...")
             
             video_name = os.path.splitext(os.path.basename(video_path))[0]
             final_filename = f"{video_name}_translated_{to_lang}.mp4"
@@ -486,17 +574,14 @@ class YouTubeTranslator:
                 progress_callback
             )
             
-            logging.info(f"Translated video saved as: {final_video_path}")
+            logging.info(f"Przetłumaczone wideo zapisano jako: {final_video_path}")
             return final_video_path
             
         except Exception as e:
-            logging.error(f"Translation process failed: {str(e)}")
+            logging.error(f"Błąd procesu tłumaczenia: {str(e)}")
             raise
         finally:
             self._clean_temp_files()
-
-    def cancel(self):
-        self.cancel_process = True
 
     def main(self, youtube_url, from_lang="en", to_lang="pl", output_dir=None, quality='best', progress_callback=None):
         if output_dir is None:
@@ -505,37 +590,37 @@ class YouTubeTranslator:
         try:
             if progress_callback:
                 progress_callback(10)
-            logging.info(f"Downloading YouTube video with quality: {quality}...")
+            logging.info(f"Pobieranie wideo YouTube w jakości: {quality}...")
             video_path = self.download_youtube_video(youtube_url, output_dir, quality, progress_callback)
             
             if progress_callback:
                 progress_callback(40)
-            logging.info("Extracting audio...")
+            logging.info("Wyodrębnianie audio...")
             audio_path = self.extract_audio(video_path, progress_callback)
             
             if progress_callback:
                 progress_callback(50)
-            logging.info("Transcribing audio...")
+            logging.info("Transkrypcja audio...")
             language, segments = self.transcribe(audio_path, progress_callback)
             
             if progress_callback:
                 progress_callback(60)
-            logging.info("Generating subtitles...")
+            logging.info("Generowanie napisów...")
             subtitle_path = self.generate_subtitle_file(language, segments, video_path)
             
             if progress_callback:
                 progress_callback(70)
-            logging.info("Translating subtitles...")
+            logging.info("Tłumaczenie napisów...")
             translated_subtitle_path = self.translate_subtitles(subtitle_path, from_lang, to_lang, progress_callback)
             
             if progress_callback:
                 progress_callback(80)
-            logging.info("Generating translated audio...")
+            logging.info("Generowanie przetłumaczonego audio...")
             translated_audio_path = self.generate_translated_audio(translated_subtitle_path, video_path, to_lang, progress_callback)
             
             if progress_callback:
                 progress_callback(95)
-            logging.info("Replacing audio track...")
+            logging.info("Zastępowanie ścieżki audio...")
             
             video_name = os.path.splitext(os.path.basename(video_path))[0]
             final_filename = f"{video_name}_translated_{to_lang}.mp4"
@@ -548,13 +633,19 @@ class YouTubeTranslator:
                 progress_callback
             )
             
-            logging.info(f"Translated video saved as: {final_video_path}")
+            logging.info(f"Przetłumaczone wideo zapisano jako: {final_video_path}")
             return final_video_path
             
         except Exception as e:
-            logging.error(f"Translation process failed: {str(e)}")
+            logging.error(f"Błąd procesu tłumaczenia: {str(e)}")
             raise
         finally:
+            self._clean_temp_files()
+
+    def cancel(self):
+        """Anuluje bieżący proces i czyści pliki tymczasowe"""
+        self.cancel_process = True
+        if self.clean_temp_files:
             self._clean_temp_files()
 
 class TextboxHandler(logging.Handler):
@@ -703,6 +794,22 @@ class YouTubeTranslatorApp(ctk.CTk):
             state="disabled")
         self.open_button.grid(row=0, column=2, padx=10, pady=5)
         
+        self.cleanup_checkbox = ctk.CTkCheckBox(
+            self.control_frame,
+            text="Clean temp files",
+            command=self.toggle_cleanup
+        )
+        self.cleanup_checkbox.grid(row=0, column=3, padx=10, pady=5, sticky="w")
+        self.cleanup_checkbox.select()
+        
+        self.open_temp_button = ctk.CTkButton(
+            self.control_frame,
+            text="📂",
+            width=28,
+            command=self.open_temp_folder
+        )
+        self.open_temp_button.grid(row=0, column=4, padx=(0,10), pady=5)
+        
         self.progress_bar = ctk.CTkProgressBar(self, orientation="horizontal")
         self.progress_bar.set(0)
         self.progress_bar.grid(row=5, column=0, columnspan=2, padx=(20,60), pady=10, sticky="ew")
@@ -726,6 +833,20 @@ class YouTubeTranslatorApp(ctk.CTk):
         
         self.log_handler = TextboxHandler(self.log_text)
         logging.getLogger().addHandler(self.log_handler)
+
+    def toggle_cleanup(self):
+        self.translator.clean_temp_files = self.cleanup_checkbox.get()
+
+    def open_temp_folder(self):
+        if self.translator.temp_folder and os.path.exists(self.translator.temp_folder):
+            if platform.system() == "Windows":
+                os.startfile(self.translator.temp_folder)
+            elif platform.system() == "Darwin":
+                subprocess.call(["open", self.translator.temp_folder])
+            else:
+                subprocess.call(["xdg-open", self.translator.temp_folder])
+        else:
+            messagebox.showinfo("Information", "No temporary files available")
 
     def choose_output_dir(self):
         output_dir = filedialog.askdirectory()
@@ -765,6 +886,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         
         self.set_ui_state(disabled=True)
         self.translator.cancel_process = False
+        self.translator.clean_temp_files = self.cleanup_checkbox.get()
         self.status_label.configure(text="Processing...", text_color="white")
         self.progress_bar.set(0)
         self.progress_label.configure(text="0%")
@@ -867,10 +989,21 @@ class YouTubeTranslatorApp(ctk.CTk):
         self.start_button.configure(state=state)
         self.cancel_button.configure(state="normal" if disabled else "disabled")
         self.open_button.configure(state="normal" if self.final_video_path else "disabled")
+        self.cleanup_checkbox.configure(state=state)
+        self.open_temp_button.configure(state=state)
 
     def on_close(self):
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
-            self.translator.cancel_process = True
+            if not self.translator.clean_temp_files:
+                keep_files = messagebox.askyesno(
+                    "Keep temporary files?",
+                    "Do you want to keep temporary files in location:\n" + 
+                    (self.translator.temp_folder if self.translator.temp_folder else "Unknown")
+                )
+                if not keep_files:
+                    self.translator.clean_temp_files = True
+                    self.translator._clean_temp_files()
+            
             self.destroy()
 
 if __name__ == "__main__":
