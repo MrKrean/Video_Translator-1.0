@@ -205,7 +205,8 @@ class YouTubeTranslator:
         return self.temp_folder
 
     def _clean_filename(self, filename):
-        return re.sub(r'[\\/*?:"<>|]', "", filename)
+        """Czyści nazwę pliku z niebezpiecznych znaków"""
+        return re.sub(r'[\\/*?:"<>|#]', "", filename)
 
     def _validate_youtube_url(self, url):
         patterns = [
@@ -530,7 +531,67 @@ class YouTubeTranslator:
             logging.error(f"Nie udało się zastąpić ścieżki audio: {str(e)}")
             raise RuntimeError(f"Nie udało się zastąpić ścieżki audio: {e}")
 
-    def process_local_video(self, video_path, from_lang="en", to_lang="pl", output_dir=None, progress_callback=None):
+    def burn_subtitles_to_video(self, video_path, subtitle_path, output_path, style=None):
+        """Nakłada napisy na wideo"""
+        if style is None:
+            style = {
+                'fontsize': 24,
+                'fontcolor': 'white',
+                'boxcolor': 'black@0.5',
+                'box': 1,
+                'borderw': 1,
+                'bordercolor': 'black',
+                'position': 'bottom'
+            }
+
+        try:
+            # Escape ścieżki do pliku z napisami dla FFmpeg
+            subtitle_path_escaped = subtitle_path.replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
+            
+            # Mapowanie pozycji na FFmpeg
+            position_mapping = {
+                'top': '10',
+                'middle': '(h-text_h)/2',
+                'bottom': 'h-text_h-10'
+            }
+            position = position_mapping.get(style['position'], 'h-text_h-10')
+
+            # Budowanie filtra subtitles
+            subtitle_filter = (
+                f"subtitles='{subtitle_path_escaped}':"
+                f"force_style='Fontsize={style['fontsize']},"
+                f"Fontcolor={style['fontcolor']},"
+                f"BackColour={style['boxcolor']},"
+                f"BorderStyle={style['borderw']},"
+                f"Outline={style['bordercolor']},"
+                f"Alignment=2'"
+            )
+
+            # Konfiguracja FFmpeg
+            input_video = ffmpeg.input(video_path)
+            
+            output = ffmpeg.output(
+                input_video,
+                output_path,
+                vf=subtitle_filter,
+                acodec='copy',
+                vcodec='libx264',
+                crf=18,
+                preset='fast'
+            )
+            
+            output.run(cmd=self.ffmpeg_path, overwrite_output=True)
+            self._keep_temp_file(output_path)
+            return output_path
+            
+        except ffmpeg.Error as e:
+            logging.error(f"FFmpeg error: {e.stderr.decode()}")
+            raise RuntimeError(f"Failed to burn subtitles: {e}")
+        except Exception as e:
+            logging.error(f"Error burning subtitles: {str(e)}")
+            raise RuntimeError(f"Error burning subtitles: {e}")
+
+    def process_local_video(self, video_path, from_lang="en", to_lang="pl", output_dir=None, progress_callback=None, add_subtitles=False, subtitle_style=None):
         try:
             self._create_output_folder(video_path)
             
@@ -564,7 +625,7 @@ class YouTubeTranslator:
             logging.info("Zastępowanie ścieżki audio...")
             
             video_name = os.path.splitext(os.path.basename(video_path))[0]
-            final_filename = f"{video_name}_translated_{to_lang}.mp4"
+            final_filename = f"{video_name}_translated.mp4"
             final_video_path = os.path.join(self.temp_folder, final_filename)
             
             final_video_path = self.replace_audio(
@@ -573,6 +634,12 @@ class YouTubeTranslator:
                 final_video_path, 
                 progress_callback
             )
+
+            # Dodanie napisów jeśli wymagane
+            if add_subtitles:
+                final_with_subs = os.path.join(self.temp_folder, f"{video_name}_with_subs.mp4")
+                self.burn_subtitles_to_video(final_video_path, translated_subtitle_path, final_with_subs, subtitle_style)
+                final_video_path = final_with_subs
             
             logging.info(f"Przetłumaczone wideo zapisano jako: {final_video_path}")
             return final_video_path
@@ -583,7 +650,7 @@ class YouTubeTranslator:
         finally:
             self._clean_temp_files()
 
-    def main(self, youtube_url, from_lang="en", to_lang="pl", output_dir=None, quality='best', progress_callback=None):
+    def main(self, youtube_url, from_lang="en", to_lang="pl", output_dir=None, quality='best', progress_callback=None, add_subtitles=False, subtitle_style=None):
         if output_dir is None:
             output_dir = self.script_dir
         
@@ -623,7 +690,7 @@ class YouTubeTranslator:
             logging.info("Zastępowanie ścieżki audio...")
             
             video_name = os.path.splitext(os.path.basename(video_path))[0]
-            final_filename = f"{video_name}_translated_{to_lang}.mp4"
+            final_filename = f"{video_name}_translated.mp4"
             final_video_path = os.path.join(self.temp_folder, final_filename)
             
             final_video_path = self.replace_audio(
@@ -632,6 +699,12 @@ class YouTubeTranslator:
                 final_video_path, 
                 progress_callback
             )
+
+            # Dodanie napisów jeśli wymagane
+            if add_subtitles:
+                final_with_subs = os.path.join(self.temp_folder, f"{video_name}_with_subs.mp4")
+                self.burn_subtitles_to_video(final_video_path, translated_subtitle_path, final_with_subs, subtitle_style)
+                final_video_path = final_with_subs
             
             logging.info(f"Przetłumaczone wideo zapisano jako: {final_video_path}")
             return final_video_path
@@ -670,11 +743,23 @@ class YouTubeTranslatorApp(ctk.CTk):
         self.translator = YouTubeTranslator()
         self.final_video_path = None
         self.title("YouTube Video Translator")
-        self.geometry("700x700")
+        self.geometry("900x700")
         self.minsize(700, 500)
         
         self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(8, weight=1)
+        self.grid_rowconfigure(8, weight=1) 
+
+        # Konfiguracja napisów
+        self.add_subtitles = False
+        self.subtitle_style = {
+            'fontsize': 24,
+            'fontcolor': 'white',
+            'boxcolor': 'black@0.5',
+            'box': 1,
+            'borderw': 1,
+            'bordercolor': 'black',
+            'position': 'bottom'
+        }
         
         self.setup_ui()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -728,6 +813,13 @@ class YouTubeTranslatorApp(ctk.CTk):
             width=200)
         self.quality_combobox.set("best")
         self.quality_combobox.grid(row=2, column=1, padx=10, pady=5, sticky="w")
+        
+        self.subtitles_checkbox = ctk.CTkCheckBox(
+            self.language_frame,
+            text="Add subtitles to video",
+            command=self.toggle_subtitles_option
+        )
+        self.subtitles_checkbox.grid(row=3, column=0, padx=10, pady=5, sticky="w")
         
         self.output_frame = ctk.CTkFrame(self)
         self.output_frame.grid(row=3, column=0, columnspan=2, padx=20, pady=10, sticky="nsew")
@@ -794,12 +886,20 @@ class YouTubeTranslatorApp(ctk.CTk):
             state="disabled")
         self.open_button.grid(row=0, column=2, padx=10, pady=5)
         
+        self.subtitles_style_button = ctk.CTkButton(
+            self.control_frame,
+            text="Subtitle Style",
+            command=self.configure_subtitles_style,
+            state="disabled"
+        )
+        self.subtitles_style_button.grid(row=0, column=3, padx=10, pady=5)
+        
         self.cleanup_checkbox = ctk.CTkCheckBox(
             self.control_frame,
             text="Clean temp files",
             command=self.toggle_cleanup
         )
-        self.cleanup_checkbox.grid(row=0, column=3, padx=10, pady=5, sticky="w")
+        self.cleanup_checkbox.grid(row=0, column=4, padx=10, pady=5, sticky="w")
         self.cleanup_checkbox.select()
         
         self.open_temp_button = ctk.CTkButton(
@@ -808,7 +908,7 @@ class YouTubeTranslatorApp(ctk.CTk):
             width=28,
             command=self.open_temp_folder
         )
-        self.open_temp_button.grid(row=0, column=4, padx=(0,10), pady=5)
+        self.open_temp_button.grid(row=0, column=5, padx=(0,10), pady=5)
         
         self.progress_bar = ctk.CTkProgressBar(self, orientation="horizontal")
         self.progress_bar.set(0)
@@ -836,6 +936,59 @@ class YouTubeTranslatorApp(ctk.CTk):
 
     def toggle_cleanup(self):
         self.translator.clean_temp_files = self.cleanup_checkbox.get()
+
+    def toggle_subtitles_option(self):
+        if self.subtitles_checkbox.get():
+            self.subtitles_style_button.configure(state="normal")
+            self.add_subtitles = True
+        else:
+            self.subtitles_style_button.configure(state="disabled")
+            self.add_subtitles = False
+
+    def configure_subtitles_style(self):
+        style_window = ctk.CTkToplevel(self)
+        style_window.title("Subtitle Style Configuration")
+        style_window.geometry("400x400")
+        
+        # Font size
+        ctk.CTkLabel(style_window, text="Font Size:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        fontsize_slider = ctk.CTkSlider(style_window, from_=10, to=50, number_of_steps=40)
+        fontsize_slider.set(self.subtitle_style['fontsize'])
+        fontsize_slider.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
+        
+        # Font color
+        ctk.CTkLabel(style_window, text="Font Color:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        fontcolor_entry = ctk.CTkEntry(style_window)
+        fontcolor_entry.insert(0, self.subtitle_style['fontcolor'])
+        fontcolor_entry.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
+        
+        # Background opacity
+        ctk.CTkLabel(style_window, text="Background Opacity:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        bg_opacity_slider = ctk.CTkSlider(style_window, from_=0, to=1, number_of_steps=10)
+        bg_opacity_slider.set(float(self.subtitle_style['boxcolor'].split('@')[-1]))
+        bg_opacity_slider.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
+        
+        # Position
+        ctk.CTkLabel(style_window, text="Position:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
+        position_combobox = ctk.CTkComboBox(style_window, values=["top", "middle", "bottom"])
+        position_combobox.set(self.subtitle_style['position'])
+        position_combobox.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
+        
+        # Save button
+        def save_style():
+            self.subtitle_style = {
+                'fontsize': int(fontsize_slider.get()),
+                'fontcolor': fontcolor_entry.get(),
+                'boxcolor': f"black@{bg_opacity_slider.get()}",
+                'box': 1,
+                'borderw': 1,
+                'bordercolor': 'black',
+                'position': position_combobox.get()
+            }
+            style_window.destroy()
+        
+        save_button = ctk.CTkButton(style_window, text="Save Style", command=save_style)
+        save_button.grid(row=4, column=0, columnspan=2, pady=20)
 
     def open_temp_folder(self):
         if self.translator.temp_folder and os.path.exists(self.translator.temp_folder):
@@ -912,7 +1065,9 @@ class YouTubeTranslatorApp(ctk.CTk):
                 from_lang,
                 to_lang,
                 output_dir,
-                progress_callback=self.update_progress
+                progress_callback=self.update_progress,
+                add_subtitles=self.add_subtitles,
+                subtitle_style=self.subtitle_style
             )
             
             self.status_label.configure(
@@ -937,7 +1092,9 @@ class YouTubeTranslatorApp(ctk.CTk):
                 to_lang,
                 output_dir,
                 quality,
-                progress_callback=self.update_progress
+                progress_callback=self.update_progress,
+                add_subtitles=self.add_subtitles,
+                subtitle_style=self.subtitle_style
             )
             
             self.status_label.configure(
@@ -989,6 +1146,8 @@ class YouTubeTranslatorApp(ctk.CTk):
         self.start_button.configure(state=state)
         self.cancel_button.configure(state="normal" if disabled else "disabled")
         self.open_button.configure(state="normal" if self.final_video_path else "disabled")
+        self.subtitles_checkbox.configure(state=state)
+        self.subtitles_style_button.configure(state="normal" if self.add_subtitles and not disabled else "disabled")
         self.cleanup_checkbox.configure(state=state)
         self.open_temp_button.configure(state=state)
 
