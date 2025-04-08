@@ -1471,18 +1471,20 @@ class YouTubeTranslatorApp(ctk.CTk):
             text="Save Subtitle Style",
             command=self.save_subtitle_settings,
             fg_color="#2aa745",
-            hover_color="#22863a"
+            hover_color="#22863a",
+            width=150
         )
-        self.save_subtitle_style_button.grid(row=0, column=0, padx=5, sticky="ew")
+        self.save_subtitle_style_button.pack(side="left", padx=6, pady=5)
 
         self.reset_subtitle_style_button = ctk.CTkButton(
             button_frame,
             text="Reset to Default",
             command=self.reset_subtitle_settings,
             fg_color="#d73a49",
-            hover_color="#cb2431"
+            hover_color="#cb2431",
+            width=150
         )
-        self.reset_subtitle_style_button.grid(row=0, column=1, padx=5, sticky="ew")
+        self.reset_subtitle_style_button.pack(side="left", padx=15, pady=5)
         
         advanced_frame = ctk.CTkFrame(self.settings_tab)
         advanced_frame.grid(row=2, column=0, padx=10, pady=10, sticky="nsew")
