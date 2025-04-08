@@ -816,8 +816,8 @@ class YouTubeTranslatorApp(ctk.CTk):
         self.local_logs_visible = True
 
         self.title("Video Translator")
-        self.geometry("850x850")
-        self.minsize(850, 850)
+        self.geometry("850x650")
+        self.minsize(850, 400)
         ctk.set_appearance_mode("Dark")
         
         try:
@@ -857,9 +857,13 @@ class YouTubeTranslatorApp(ctk.CTk):
 
     def setup_about_tab(self):
         self.about_tab.grid_columnconfigure(0, weight=1)
-        self.about_tab.grid_rowconfigure(1, weight=1)
+        self.about_tab.grid_rowconfigure(0, weight=1)
         
-        info_frame = ctk.CTkFrame(self.about_tab)
+        scroll_frame = ctk.CTkScrollableFrame(self.about_tab)
+        scroll_frame.grid(row=0, column=0, padx=0, pady=0, sticky="nsew")
+        scroll_frame.grid_columnconfigure(0, weight=1)
+        
+        info_frame = ctk.CTkFrame(scroll_frame)
         info_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         info_frame.grid_columnconfigure(0, weight=1)
         
@@ -891,7 +895,7 @@ class YouTubeTranslatorApp(ctk.CTk):
             font=ctk.CTkFont(size=12)
         ).grid(row=2, column=0, pady=(0, 10), sticky="w")
         
-        help_frame = ctk.CTkFrame(self.about_tab)
+        help_frame = ctk.CTkFrame(scroll_frame)
         help_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
         help_frame.grid_columnconfigure(0, weight=1)
         
@@ -927,7 +931,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         )
         docs_button.grid(row=2, column=0, pady=10, sticky="ew")
         
-        footer_frame = ctk.CTkFrame(self.about_tab, fg_color="transparent")
+        footer_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
         footer_frame.grid(row=2, column=0, padx=10, pady=10, sticky="sew")
         
         ctk.CTkLabel(
@@ -944,8 +948,13 @@ class YouTubeTranslatorApp(ctk.CTk):
 
     def setup_youtube_tab(self):
         self.youtube_tab.grid_columnconfigure(0, weight=1)
+        self.youtube_tab.grid_rowconfigure(0, weight=1)
+        
+        scroll_frame = ctk.CTkScrollableFrame(self.youtube_tab)
+        scroll_frame.grid(row=0, column=0, padx=0, pady=0, sticky="nsew")
+        scroll_frame.grid_columnconfigure(0, weight=1)
 
-        url_frame = ctk.CTkFrame(self.youtube_tab)
+        url_frame = ctk.CTkFrame(scroll_frame)
         url_frame.grid(row=0, column=0, padx=10, pady=(5, 10), sticky="nsew")
         url_frame.grid_columnconfigure(1, weight=1)
         
@@ -959,7 +968,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         )
         self.url_entry.grid(row=0, column=1, padx=10, pady=(10, 5), sticky="ew")
 
-        settings_frame = ctk.CTkFrame(self.youtube_tab)
+        settings_frame = ctk.CTkFrame(scroll_frame)
         settings_frame.grid(row=2, column=0, padx=10, pady=10, sticky="nsew")
         settings_frame.grid_columnconfigure(1, weight=1)
 
@@ -1019,7 +1028,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         )
         self.subtitle_settings_button.pack(side="left")
 
-        output_frame = ctk.CTkFrame(self.youtube_tab)
+        output_frame = ctk.CTkFrame(scroll_frame)
         output_frame.grid(row=4, column=0, padx=10, pady=10, sticky="nsew")
         output_frame.grid_columnconfigure(1, weight=1)
 
@@ -1044,7 +1053,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         )
         self.output_dir_button.grid(row=0, column=2, padx=10, pady=5)
 
-        button_frame = ctk.CTkFrame(self.youtube_tab)
+        button_frame = ctk.CTkFrame(scroll_frame)
         button_frame.grid(row=5, column=0, padx=10, pady=10, sticky="nsew")
 
         self.start_button = ctk.CTkButton(
@@ -1057,7 +1066,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         )
         self.start_button.pack(side="left", padx=10, pady=5)
 
-        self.youtube_status_frame = ctk.CTkFrame(self.youtube_tab)
+        self.youtube_status_frame = ctk.CTkFrame(scroll_frame)
         self.youtube_status_frame.grid(row=6, column=0, padx=10, pady=(5, 10), sticky="nsew")
         self.youtube_status_frame.grid_columnconfigure(1, weight=1)
 
@@ -1097,7 +1106,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         )
         self.open_button.pack(side="right", padx=10, pady=5)
 
-        log_frame = ctk.CTkFrame(self.youtube_tab)
+        log_frame = ctk.CTkFrame(scroll_frame)
         log_frame.grid(row=7, column=0, padx=10, pady=(10, 5), sticky="nsew")
         log_frame.grid_columnconfigure(0, weight=1)
         log_frame.grid_rowconfigure(1, weight=1)
@@ -1132,8 +1141,13 @@ class YouTubeTranslatorApp(ctk.CTk):
 
     def setup_local_tab(self):
         self.local_tab.grid_columnconfigure(0, weight=1)
+        self.local_tab.grid_rowconfigure(0, weight=1)
+        
+        scroll_frame = ctk.CTkScrollableFrame(self.local_tab)
+        scroll_frame.grid(row=0, column=0, padx=0, pady=0, sticky="nsew")
+        scroll_frame.grid_columnconfigure(0, weight=1)
 
-        file_frame = ctk.CTkFrame(self.local_tab)
+        file_frame = ctk.CTkFrame(scroll_frame)
         file_frame.grid(row=0, column=0, padx=10, pady=(5, 10), sticky="nsew")
         file_frame.grid_columnconfigure(1, weight=1)
 
@@ -1159,7 +1173,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         )
         self.local_file_button.grid(row=0, column=2, padx=(5, 10), pady=(10, 5), sticky="e")
 
-        settings_frame = ctk.CTkFrame(self.local_tab)
+        settings_frame = ctk.CTkFrame(scroll_frame)
         settings_frame.grid(row=2, column=0, padx=10, pady=10, sticky="nsew")
         settings_frame.grid_columnconfigure(1, weight=1)
 
@@ -1207,7 +1221,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         )
         self.local_subtitle_settings_button.pack(side="left")
 
-        output_frame = ctk.CTkFrame(self.local_tab)
+        output_frame = ctk.CTkFrame(scroll_frame)
         output_frame.grid(row=3, column=0, padx=10, pady=10, sticky="nsew")
         output_frame.grid_columnconfigure(1, weight=1)
 
@@ -1234,7 +1248,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         )
         self.local_output_dir_button.grid(row=0, column=2, padx=10, pady=5)
 
-        button_frame = ctk.CTkFrame(self.local_tab)
+        button_frame = ctk.CTkFrame(scroll_frame)
         button_frame.grid(row=4, column=0, padx=10, pady=10, sticky="nsew")
 
         self.local_start_button = ctk.CTkButton(
@@ -1247,7 +1261,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         )
         self.local_start_button.pack(side="left", padx=10, pady=5)
 
-        self.local_status_frame = ctk.CTkFrame(self.local_tab)
+        self.local_status_frame = ctk.CTkFrame(scroll_frame)
         self.local_status_frame.grid(row=5, column=0, padx=10, pady=(5, 10), sticky="nsew")
         self.local_status_frame.grid_columnconfigure(1, weight=1)
 
@@ -1287,7 +1301,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         )
         self.local_open_button.pack(side="right", padx=10, pady=5)
 
-        log_frame = ctk.CTkFrame(self.local_tab)
+        log_frame = ctk.CTkFrame(scroll_frame)
         log_frame.grid(row=6, column=0, padx=10, pady=(10, 5), sticky="nsew")
         log_frame.grid_columnconfigure(0, weight=1)
         log_frame.grid_rowconfigure(1, weight=1)
@@ -1322,8 +1336,13 @@ class YouTubeTranslatorApp(ctk.CTk):
 
     def setup_settings_tab(self):
         self.settings_tab.grid_columnconfigure(0, weight=1)
+        self.settings_tab.grid_rowconfigure(0, weight=1)
         
-        general_frame = ctk.CTkFrame(self.settings_tab)
+        scroll_frame = ctk.CTkScrollableFrame(self.settings_tab)
+        scroll_frame.grid(row=0, column=0, padx=0, pady=0, sticky="nsew")
+        scroll_frame.grid_columnconfigure(0, weight=1)
+        
+        general_frame = ctk.CTkFrame(scroll_frame)
         general_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         general_frame.grid_columnconfigure(1, weight=1)
         
@@ -1354,7 +1373,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         self.color_theme.set("blue")
         self.color_theme.grid(row=2, column=1, padx=10, pady=5, sticky="w")
         
-        subtitle_frame = ctk.CTkFrame(self.settings_tab)
+        subtitle_frame = ctk.CTkFrame(scroll_frame)
         subtitle_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
         subtitle_frame.grid_columnconfigure(1, weight=1)
         
@@ -1486,7 +1505,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         )
         self.reset_subtitle_style_button.pack(side="left", padx=15, pady=5)
         
-        advanced_frame = ctk.CTkFrame(self.settings_tab)
+        advanced_frame = ctk.CTkFrame(scroll_frame)
         advanced_frame.grid(row=2, column=0, padx=10, pady=10, sticky="nsew")
         advanced_frame.grid_columnconfigure(1, weight=1)
         
@@ -1515,7 +1534,7 @@ class YouTubeTranslatorApp(ctk.CTk):
         )
         self.ffmpeg_path_label.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
         
-        reset_frame = ctk.CTkFrame(self.settings_tab)
+        reset_frame = ctk.CTkFrame(scroll_frame)
         reset_frame.grid(row=3, column=0, padx=10, pady=10, sticky="nsew")
 
     def reset_subtitle_settings(self):
