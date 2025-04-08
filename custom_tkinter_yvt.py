@@ -571,7 +571,50 @@ class YouTubeTranslator:
         try:
             subtitle_path_escaped = subtitle_path.replace('\\', '/').replace(':', '\\:').replace("'", "\\'")
             
-            # Mapowanie pozycji
+            # Mapowanie kolorów
+            color_mapping = {
+                'white': '0xFFFFFF',
+                'black': '0x000000',
+                'red': '0xFF0000',
+                'green': '0x00FF00',
+                'blue': '0x0000FF',
+                'yellow': '0xFFFF00',
+                'cyan': '0x00FFFF',
+                'magenta': '0xFF00FF'
+            }
+            
+            # Konwersja koloru tekstu
+            fontcolor = style['fontcolor']
+            if fontcolor.lower() in color_mapping:
+                fontcolor = color_mapping[fontcolor.lower()]
+            elif fontcolor.startswith('#'):
+                fontcolor = f"0x{fontcolor[1:]}"
+            else:
+                fontcolor = '0xFFFFFF'  # Domyślny biały
+            
+            # Konwersja koloru tła
+            boxcolor = style['boxcolor'].split('@')[0] if '@' in style['boxcolor'] else 'black'
+            if boxcolor.lower() in color_mapping:
+                boxcolor = color_mapping[boxcolor.lower()]
+            elif boxcolor.startswith('#'):
+                boxcolor = f"0x{boxcolor[1:]}"
+            else:
+                boxcolor = '0x000000'  # Domyślny czarny
+            
+            # Przezroczystość tła
+            bg_opacity = style['boxcolor'].split('@')[1] if '@' in style['boxcolor'] else '0.5'
+            boxcolor_alpha = f"{boxcolor}{int(float(bg_opacity)*255):02x}"
+            
+            # Konwersja koloru obramowania
+            bordercolor = style['bordercolor']
+            if bordercolor.lower() in color_mapping:
+                bordercolor = color_mapping[bordercolor.lower()]
+            elif bordercolor.startswith('#'):
+                bordercolor = f"0x{bordercolor[1:]}"
+            else:
+                bordercolor = '0x000000'  # Domyślny czarny
+            
+            # Mapowanie pozycji i wyrównania
             position_mapping = {
                 'top': '10',
                 'middle': '(h-text_h)/2',
@@ -579,7 +622,6 @@ class YouTubeTranslator:
             }
             position = position_mapping.get(style['position'], 'h-text_h-10')
             
-            # Mapowanie wyrównania
             alignment_mapping = {
                 'left': '1',
                 'center': '2',
@@ -587,32 +629,16 @@ class YouTubeTranslator:
             }
             alignment = alignment_mapping.get(style.get('alignment', 'center'), '2')
             
-            # Przygotowanie stylu
-            font = style.get('fontfamily', 'Arial')
-            fontsize = style['fontsize']
-            fontcolor = style['fontcolor']
-            bg_color = style['boxcolor'].split('@')[0] if '@' in style['boxcolor'] else 'black'
-            bg_opacity = style['boxcolor'].split('@')[1] if '@' in style['boxcolor'] else '0.5'
-            border_width = style['borderw']
-            border_color = style['bordercolor']
-            
-            # Konwersja kolorów do formatu FFmpeg
-            if fontcolor.startswith('#'):
-                fontcolor = f"0x{fontcolor[1:]}"
-            if bg_color.startswith('#'):
-                bg_color = f"0x{bg_color[1:]}"
-            if border_color.startswith('#'):
-                border_color = f"0x{border_color[1:]}"
-            
+            # Przygotowanie filtra napisów
             subtitle_filter = (
                 f"subtitles='{subtitle_path_escaped}':"
                 f"force_style='"
-                f"Fontname={font},"
-                f"Fontsize={fontsize},"
-                f"PrimaryColour={fontcolor},"
-                f"BackColour={bg_color}{int(float(bg_opacity)*255):02x},"
-                f"BorderStyle={border_width},"
-                f"OutlineColour={border_color},"
+                f"Fontname={style.get('fontfamily', 'Arial')},"
+                f"Fontsize={style['fontsize']},"
+                f"PrimaryColour={fontcolor},"  # Kolor tekstu
+                f"BackColour={boxcolor_alpha},"  # Kolor tła z przezroczystością
+                f"BorderStyle={style['borderw']},"
+                f"OutlineColour={bordercolor},"  # Kolor obramowania
                 f"Alignment={alignment},"
                 f"MarginV=20'"
             )
@@ -1340,38 +1366,6 @@ class YouTubeTranslatorApp(ctk.CTk):
         self.fontfamily_combobox.set("Arial")
         self.fontfamily_combobox.grid(row=2, column=1, padx=5, pady=5, sticky="ew", columnspan=2)
         
-        # Background settings
-        bg_frame = ctk.CTkFrame(subtitle_frame, fg_color="transparent")
-        bg_frame.grid(row=2, column=0, padx=5, pady=5, sticky="nsew", columnspan=3)
-        
-        # Background opacity
-        ctk.CTkLabel(bg_frame, text="Background Opacity:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.bg_opacity_slider = ctk.CTkSlider(
-            bg_frame, 
-            from_=0, 
-            to=1,
-            number_of_steps=10,
-            command=lambda v: self.update_subtitle_preview()
-        )
-        bg_opacity = float(self.subtitle_style['boxcolor'].split('@')[1]) if '@' in self.subtitle_style['boxcolor'] else 0.5
-        self.bg_opacity_slider.set(bg_opacity)
-        self.bg_opacity_slider.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        self.bg_opacity_value = ctk.CTkLabel(bg_frame, text=f"{bg_opacity:.1f}")
-        self.bg_opacity_value.grid(row=0, column=2, padx=5, pady=5, sticky="w")
-        
-        # Background color
-        ctk.CTkLabel(bg_frame, text="Background Color:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        self.bg_color_entry = ctk.CTkEntry(bg_frame)
-        self.bg_color_entry.insert(0, "black")
-        self.bg_color_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
-        self.bg_color_button = ctk.CTkButton(
-            bg_frame,
-            text="Pick",
-            width=50,
-            command=self.pick_bg_color
-        )
-        self.bg_color_button.grid(row=1, column=2, padx=5, pady=5, sticky="w")
-        
         # Border settings
         border_frame = ctk.CTkFrame(subtitle_frame, fg_color="transparent")
         border_frame.grid(row=3, column=0, padx=5, pady=5, sticky="nsew", columnspan=3)
@@ -1472,15 +1466,6 @@ class YouTubeTranslatorApp(ctk.CTk):
         self.cleanup_checkbox.grid(row=1, column=0, padx=10, pady=5, sticky="w", columnspan=2)
         self.cleanup_checkbox.select()
         
-        # Przycisk czyszczenia
-        self.clean_now_button = ctk.CTkButton(
-            advanced_frame,
-            text="Clean Now",
-            command=self.clean_temp_files_now,
-            width=120
-        )
-        self.clean_now_button.grid(row=1, column=1, padx=10, pady=5, sticky="e")
-        
         # Ścieżka do FFmpeg
         ctk.CTkLabel(advanced_frame, text="FFmpeg Path:").grid(
             row=2, column=0, padx=10, pady=5, sticky="w")
@@ -1536,13 +1521,10 @@ class YouTubeTranslatorApp(ctk.CTk):
         try:
             fontsize = int(self.fontsize_slider.get())
             fontcolor = self.fontcolor_entry.get()
-            bg_opacity = self.bg_opacity_slider.get()
-            bg_color = self.bg_color_entry.get()
             border_width = int(self.border_width_slider.get())
             border_color = self.border_color_entry.get()
-            
+        
             self.fontsize_value.configure(text=str(fontsize))
-            self.bg_opacity_value.configure(text=f"{bg_opacity:.1f}")
             self.border_width_value.configure(text=str(border_width))
             
             # Update preview label
@@ -1550,7 +1532,7 @@ class YouTubeTranslatorApp(ctk.CTk):
                 text="Sample Subtitle Text",
                 font=ctk.CTkFont(size=fontsize),
                 text_color=fontcolor,
-                fg_color=self.hex_to_rgba(bg_color, bg_opacity),
+                fg_color="transparent",  # No background
                 corner_radius=0,
             )
         except Exception as e:
@@ -1573,26 +1555,25 @@ class YouTubeTranslatorApp(ctk.CTk):
     def save_subtitle_settings(self):
         fontsize = int(self.fontsize_slider.get())
         fontcolor = self.fontcolor_entry.get()
-        bg_opacity = self.bg_opacity_slider.get()
-        bg_color = self.bg_color_entry.get()
-        border_width = int(self.border_width_slider.get())
-        border_color = self.border_color_entry.get()
+        border_width = int(self.border_width_slider.get())  # Keep this
+        border_color = self.border_color_entry.get()  # Keep this
         position = self.position_combobox.get()
         alignment = self.alignment_combobox.get()
         fontfamily = self.fontfamily_combobox.get()
         
+        # Remove the boxcolor and box settings
         self.subtitle_style.update({
             'fontsize': fontsize,
             'fontcolor': fontcolor,
-            'boxcolor': f"{bg_color}@{bg_opacity}",
-            'box': 1,
             'borderw': border_width,
             'bordercolor': border_color,
             'position': position,
             'alignment': alignment,
-            'fontfamily': fontfamily
+            'fontfamily': fontfamily,
+            'box': 0,  # Disable background box
+            'boxcolor': 'black@0'  # Make transparent
         })
-        
+    
         messagebox.showinfo("Info", "Subtitle style saved successfully")
 
     def toggle_log_visibility(self):
@@ -1821,10 +1802,8 @@ class YouTubeTranslatorApp(ctk.CTk):
         self.appearance_mode.configure(state=state)
         self.color_theme.configure(state=state)
         self.cleanup_checkbox.configure(state=state)
-        self.clean_now_button.configure(state=state)
         self.fontsize_slider.configure(state=state)
         self.fontcolor_entry.configure(state=state)
-        self.bg_opacity_slider.configure(state=state)
         self.position_combobox.configure(state=state)
         self.save_subtitle_style_button.configure(state=state)
     
